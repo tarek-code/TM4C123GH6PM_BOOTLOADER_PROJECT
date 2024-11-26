@@ -9,4 +9,6 @@
   E:\Users\Unlimited\AppData\Local\Arm\Packs\ARM\CMSIS\6.1.0\CMSIS\Core\Include\m-profile\cmsis_armclang_m.h \
   E:\Users\Unlimited\AppData\Local\Arm\Packs\ARM\CMSIS\6.1.0\CMSIS\Core\Include\m-profile\armv7m_mpu.h \
   E:\Users\Unlimited\AppData\Local\Arm\Packs\Keil\TM4C_DFP\1.1.0\Device\Include\TM4C123\system_TM4C123.h \
-  button.h gpio.h
+  button.h gpio.h FreeRTOS.h E:\Keil_v5\ARM\ARMCLANG\include\stddef.h \
+  FreeRTOSConfig.h projdefs.h portable.h deprecated_definitions.h \
+  portmacro.h mpu_wrappers.h task.h list.h

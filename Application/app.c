@@ -1,39 +1,81 @@
 #include "sysclockcfg.h"
 #include "button.h"
 #include "gpio.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
-#define LED_RED_PIN 1    // PF1 is Red LED
-#define BUTTON_PIN 0     // PF0 is Button
-#include <stdint.h>
+#define LED_RED_PIN_ 1  // PF1 is Red LED
+#define LED_BLUE_PIN_ 2  // PF1 is Red LED
+#define LED_GREEN_PIN 3  // PF1 is Red LED
 
-
-void GPIOF_Handler(void); // Interrupt handler prototype
-int main(void) {
-    // Initialize UART5 with a baud rate of 9600
-	SysClockSet(16);
-// Initialize the Red LED (PF1) as output
-    GPIO_Init(GPIOF, LED_RED_PIN, GPIO_MODE_OUTPUT);
-    GPIO_WritePin(GPIOF, LED_RED_PIN, 0); // Start with LED off
-
-    // Initialize the button (PF0) as input with pull-up resistor
-    Button_Init(GPIOF, BUTTON_PIN);
-
-    // Enable interrupts for PF0 (button)
-    GPIOF->IS &= ~(1U << BUTTON_PIN);  // Edge-sensitive
-    GPIOF->IBE &= ~(1U << BUTTON_PIN); // Interrupt controlled by IEV
-    GPIOF->IEV &= ~(1U << BUTTON_PIN); // Falling edge trigger
-    GPIOF->IM |= (1U << BUTTON_PIN);   // Enable interrupt for PF0
-    NVIC_EnableIRQ(GPIOF_IRQn);        // Enable interrupt in NVIC
-    // Small delay to ensure UART5 is fully initialized
-
+void vTask1(void *pvParameters) {
     while (1) {
-
+        GPIO_WritePin(GPIOF, LED_RED_PIN_, 1);  // Turn LED on
+        vTaskDelay(pdMS_TO_TICKS(10000));       // Delay for 1 second
+        GPIO_WritePin(GPIOF, LED_RED_PIN_, 0);  // Turn LED off
+        vTaskDelay(pdMS_TO_TICKS(10000));       // Delay for 1 second
     }
 }
-// GPIO Port F interrupt handler
-void GPIOF_Handler(void) {
-    if (GPIOF->MIS & (1U << BUTTON_PIN)) { // Check if interrupt occurred on PF0
-        GPIOF->ICR |= (1U << BUTTON_PIN); // Clear the interrupt flag
-        GPIOF->DATA ^= (1U << LED_RED_PIN); // Toggle the Red LED
+
+void vTask2(void *pvParameters) {
+    while (1) {
+        GPIO_WritePin(GPIOF, LED_GREEN_PIN, 1);  // Turn LED on
+        vTaskDelay(pdMS_TO_TICKS(1000));       // Delay for 1 second
+        GPIO_WritePin(GPIOF, LED_GREEN_PIN, 0);  // Turn LED off
+        vTaskDelay(pdMS_TO_TICKS(1000));       // Delay for 1 second
+    }
+}
+
+
+void vTask3(void *pvParameters) {
+    while (1) {
+        GPIO_WritePin(GPIOF, LED_BLUE_PIN_, 1);  // Turn LED on
+        vTaskDelay(pdMS_TO_TICKS(100));       // Delay for 1 second
+        GPIO_WritePin(GPIOF, LED_BLUE_PIN_, 0);  // Turn LED off
+        vTaskDelay(pdMS_TO_TICKS(100));       // Delay for 1 second
+    }
+}
+
+
+int main(void) {
+    SysClockSet(16);  // Initialize system clock to 16 MHz
+    GPIO_Init(GPIOF, LED_RED_PIN_, GPIO_MODE_OUTPUT);
+	GPIO_Init(GPIOF, LED_GREEN_PIN, GPIO_MODE_OUTPUT);
+	GPIO_Init(GPIOF, LED_BLUE_PIN_, GPIO_MODE_OUTPUT);
+    GPIO_WritePin(GPIOF, LED_RED_PIN_, 0);  // Start with LED off
+	GPIO_WritePin(GPIOF, LED_GREEN_PIN, 0);  // Start with LED off
+	GPIO_WritePin(GPIOF, LED_BLUE_PIN_, 0);  // Start with LED off
+
+    xTaskCreate(
+        vTask1,       /* Task function. */
+        "LED_Task",   /* Task name. */
+        configMINIMAL_STACK_SIZE, /* Stack size. */
+        NULL,         /* Task parameters. */
+        1,            /* Task priority. */
+        NULL          /* Task handle. */
+    );
+	
+	 xTaskCreate(
+        vTask2,       /* Task function. */
+        "GREEN_Task",   /* Task name. */
+        configMINIMAL_STACK_SIZE, /* Stack size. */
+        NULL,         /* Task parameters. */
+        2,            /* Task priority. */
+        NULL          /* Task handle. */
+    );
+		
+		 xTaskCreate(
+        vTask3,       /* Task function. */
+        "BLUE_Task",   /* Task name. */
+        configMINIMAL_STACK_SIZE, /* Stack size. */
+        NULL,         /* Task parameters. */
+        3,            /* Task priority. */
+        NULL          /* Task handle. */
+    );
+
+    vTaskStartScheduler();  // Start the FreeRTOS scheduler
+
+    while (1) {
+        // Main loop
     }
 }
