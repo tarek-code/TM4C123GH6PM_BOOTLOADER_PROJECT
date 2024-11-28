@@ -1,0 +1,846 @@
+Bootloader_project_TM4C123GH6PM 
+bootloader side 
+#include "bootloader.h"
+
+static uint8_t BL_Host_Buffer[BL_MAX_HOST_BUFFER];
+/* ----------------- Static Functions Decleration -----------------*/
+static void Bootloader_Get_Version(uint8_t *Host_Buffer);
+static void Bootloader_Get_Help(uint8_t *Host_Buffer);
+static void Bootloader_Get_Chip_Identification_Number(uint8_t *Host_Buffer);
+static void Bootloader_Jump_To_Address(uint8_t *Host_Buffer);
+static void Bootloader_Erase_Flash(uint8_t *Host_Buffer);
+static void Bootloader_Memory_Write(uint8_t *Host_Buffer);
+
+
+
+/* Helper functions */
+static uint8_t Bootloader_CRC_Verify(uint8_t *pData, uint32_t Data_Len, uint32_t Host_CRC);
+static void Bootloader_Send_ACK(uint8_t Replay_Len);
+static void Bootloader_Send_NACK(void);
+static void Bootloader_Send_Data_To_Host(uint8_t *Host_Buffer, uint32_t Data_Len);
+static uint8_t Host_Address_Verification(uint32_t Jump_Address);
+static uint8_t Perform_Flash_Erase(uint8_t Sector_Numebr, uint8_t Number_Of_Sectors);
+static void jump_to_user_app(void);
+static uint8_t Flash_Memory_Write_Payload(uint8_t *Host_Payload, uint32_t Payload_Start_Address, uint16_t Payload_Len);
+
+
+
+/* static local variables  */
+static uint8_t Bootloader_Supported_CMDs[6] = {
+    CBL_GET_VER_CMD,
+    CBL_GET_HELP_CMD,
+    CBL_GET_CID_CMD,
+    CBL_GO_TO_ADDR_CMD,
+    CBL_FLASH_ERASE_CMD,
+    CBL_MEM_WRITE_CMD,
+};
+
+
+
+
+
+
+
+/************************************************************************************************/
+BL_Statuse BL_UART_Fetch_Host_Command(void){
+BL_Statuse state=BL_NOK;
+	uint8_t Data_length=0;
+	memset(BL_Host_Buffer,0,BL_MAX_HOST_BUFFER);
+	UART_ReadString(BL_HOST_COMMUNICATION_UART,(uint8_t *)BL_Host_Buffer,1);
+	Data_length=BL_Host_Buffer[0];
+	UART_ReadString(BL_HOST_COMMUNICATION_UART,(uint8_t *)&BL_Host_Buffer[1],Data_length);
+	switch(BL_Host_Buffer[1]){
+		case CBL_GET_VER_CMD:
+			BL_Print_Messege("CBL_GET_VER_CMD \n");
+		Bootloader_Get_Version(BL_Host_Buffer);
+		break;
+		case CBL_GET_HELP_CMD:
+			BL_Print_Messege("CBL_GET_HELP_CMD \n");
+		Bootloader_Get_Help(BL_Host_Buffer);
+		break;
+		case CBL_GET_CID_CMD:
+			BL_Print_Messege("CBL_GET_CID_CMD \n");
+		Bootloader_Get_Chip_Identification_Number(BL_Host_Buffer);
+		break;
+		
+		case CBL_GO_TO_ADDR_CMD:
+			BL_Print_Messege("CBL_GO_TO_ADDR_CMD \n");
+		Bootloader_Jump_To_Address(BL_Host_Buffer);
+		break;
+		case CBL_FLASH_ERASE_CMD:
+			BL_Print_Messege("CBL_FLASH_ERASE_CMD \n");
+		Bootloader_Erase_Flash(BL_Host_Buffer);
+		break;
+		case CBL_MEM_WRITE_CMD:
+			BL_Print_Messege("CBL_MEM_WRITE_CMD \n");
+		Bootloader_Memory_Write(BL_Host_Buffer);
+		break;		
+		default:
+			
+		BL_Print_Messege("Invalid Command selected \n");
+		break;
+	}
+	return state;
+}
+
+
+static void Bootloader_Get_Version(uint8_t *Host_Buffer){
+	uint8_t BL_Version[CRC_TYPE_SIZE_BYTE]={CBL_VENDOR_ID,CBL_SW_MAJOR_VERSION,CBL_SW_MINOR_VERSION,CBL_SW_PATCH_VERSION};
+	uint16_t Host_CMD_Packet_Len=0;
+	uint32_t Host_CRC32=0;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+	
+		Bootloader_Send_ACK(4);
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,BL_Version,4);
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+}
+static void Bootloader_Get_Help(uint8_t *Host_Buffer){
+uint16_t Host_CMD_Packet_Len=0;
+	uint32_t Host_CRC32=0;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+		Bootloader_Send_ACK(6);
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,Bootloader_Supported_CMDs,6);
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+	
+}
+static void Bootloader_Get_Chip_Identification_Number(uint8_t *Host_Buffer){
+  uint16_t Host_CMD_Packet_Len=0;
+	uint32_t Host_CRC32=0;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	uint16_t Fam=0;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+		Fam=SYSCTL->DID1;
+		Bootloader_Send_ACK(2);
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,(uint8_t *)(&Fam),2);
+		//jump_to_user_app();	
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+}
+static void Bootloader_Jump_To_Address(uint8_t *Host_Buffer){
+	uint16_t Host_CMD_Packet_Len=0;
+	uint32_t Host_CRC32=0;
+	uint8_t add_state=ADDRESS_IS_INVALID;
+	uint32_t adrees=0;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+		Bootloader_Send_ACK(1);
+		adrees=*((uint32_t *)&Host_Buffer[2]);
+		add_state=Host_Address_Verification(adrees);
+		if(add_state==ADDRESS_IS_VALID){
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,(uint8_t *)&add_state,1);
+			Jump_Ptr jumping=(Jump_Ptr) (adrees+1);
+			jumping();
+			
+		}
+		else if (add_state==ADDRESS_IS_SPECTISL){
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,(uint8_t *)&add_state,1);
+			jump_to_user_app();
+		}
+		else{
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,(uint8_t *)&add_state,1);
+		}
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+}
+
+
+
+
+
+
+static void Bootloader_Erase_Flash(uint8_t *Host_Buffer){
+uint16_t Host_CMD_Packet_Len=0;
+	uint32_t Host_CRC32=0;
+	uint8_t erease_statuse=UNSUCCESSFUL_ERASE;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+		Bootloader_Send_ACK(1);
+	//	Flash_EraseSectors(12, 2);
+		erease_statuse=Perform_Flash_Erase(Host_Buffer[2],Host_Buffer[3]);
+		if(erease_statuse==SUCCESSFUL_ERASE){
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,&erease_statuse,1);
+		}
+		else{
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,&erease_statuse,1);
+		}
+		
+		
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+}
+static void Bootloader_Memory_Write(uint8_t *Host_Buffer){
+	uint16_t Host_CMD_Packet_Len=0;
+	uint8_t write_state=FLASH_PAYLOAD_WRITE_FAILED;
+	uint32_t Host_CRC32=0;
+	uint8_t add_verefication=ADDRESS_IS_INVALID;
+	Host_CMD_Packet_Len=Host_Buffer[0]+1;
+	Host_CRC32=*((uint32_t *)((Host_Buffer+Host_CMD_Packet_Len)-CRC_TYPE_SIZE_BYTE));
+	
+	if(CRC_VERIFICATION_PASSED==Bootloader_CRC_Verify((uint8_t *)(&Host_Buffer[0]),Host_CMD_Packet_Len-CRC_TYPE_SIZE_BYTE,Host_CRC32)){
+		Bootloader_Send_ACK(1);
+		if(ADDRESS_IS_VALID==Host_Address_Verification(*((uint32_t *)&Host_Buffer[2])) || ADDRESS_IS_SPECTISL==Host_Address_Verification(*((uint32_t *)&Host_Buffer[2]))){
+		write_state=Flash_Memory_Write_Payload(&Host_Buffer[7],*((uint32_t *)&Host_Buffer[2]),Host_Buffer[6]);
+			if(write_state==FLASH_PAYLOAD_WRITE_PASSED){
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,&write_state,1);
+		}
+		else{
+			write_state=FLASH_PAYLOAD_WRITE_FAILED;
+		UART_WriteString(BL_HOST_COMMUNICATION_UART,&write_state,1);
+		}
+		}
+		else{
+		write_state=FLASH_PAYLOAD_WRITE_FAILED;
+			UART_WriteString(BL_HOST_COMMUNICATION_UART,&write_state,1);
+		}
+		
+		
+	}
+	else{
+	Bootloader_Send_NACK();
+	}
+}
+static uint8_t Flash_Memory_Write_Payload(uint8_t *Host_Payload, uint32_t Payload_Start_Address, uint16_t Payload_Len){
+Flash_Status HAL_Status = FLASH_ERROR;
+	uint8_t Flash_Payload_Write_Status = FLASH_PAYLOAD_WRITE_FAILED;
+	uint16_t Payload_Counter = 0;
+	
+	Flash_Unlock();
+
+		for(Payload_Counter = 0; Payload_Counter < Payload_Len; Payload_Counter++){
+			/* Program a byte at a specified address */
+			HAL_Status = HAL_FLASH_Program(Payload_Start_Address + Payload_Counter, Host_Payload[Payload_Counter]);
+			if(HAL_Status==FLASH_ERROR){
+			Flash_Payload_Write_Status = FLASH_PAYLOAD_WRITE_FAILED;
+			break;		
+			}
+			else{
+						Flash_Payload_Write_Status = FLASH_PAYLOAD_WRITE_PASSED;
+			}
+		}
+	
+	
+	
+		/* Locks the FLASH control register access */
+		 Flash_Lock();
+		
+			
+		
+		
+	
+	
+	return Flash_Payload_Write_Status;
+}
+
+
+static uint8_t Bootloader_CRC_Verify(uint8_t *pData, uint32_t Data_Len, uint32_t Host_CRC){
+uint8_t crc_statuse=CRC_VERIFICATION_FAILED;
+	uint32_t crc_calculated=0xFFFFFFFF;
+	uint8_t Data_Counter=0;
+	uint32_t Data_Buffer=0;
+	
+	for(Data_Counter=0;Data_Counter<Data_Len;Data_Counter++){
+	Data_Buffer=(uint32_t)pData[Data_Counter];
+	crc_calculated=Crc32(crc_calculated,&Data_Buffer,1);
+	}
+	
+	if (crc_calculated==Host_CRC){
+		crc_statuse=CRC_VERIFICATION_PASSED;
+	}
+	else{
+	crc_statuse=CRC_VERIFICATION_FAILED;
+	}
+	return crc_statuse;
+}
+
+
+
+
+static void Bootloader_Send_ACK(uint8_t Replay_Len){
+uint8_t ACK_Value[2]={0};
+ACK_Value[0]=CBL_SEND_ACK;
+ACK_Value[1]=Replay_Len;
+UART_WriteString(BL_HOST_COMMUNICATION_UART,ACK_Value,2);
+}
+static void Bootloader_Send_NACK(void){
+uint8_t ACK_Value=CBL_SEND_NACK;
+	UART_WriteString(BL_HOST_COMMUNICATION_UART,&ACK_Value,1);
+}
+
+
+
+static uint8_t Host_Address_Verification(uint32_t Jump_Address){
+	uint8_t add_state=ADDRESS_IS_INVALID;
+	if(FLASH_SECTOR12_BASE_ADDRESS==Jump_Address){
+		add_state=ADDRESS_IS_SPECTISL;
+	}
+	else if((Jump_Address>=FLASH_BASE && Jump_Address<=TM4C123GH6PM_FLASH_END)||(Jump_Address>=SRAM_BASE && Jump_Address<=TM4C123GH6PM_SRAM_END)||(Jump_Address>=EEPROM_BASE_END && Jump_Address<=TM4C123GH6PM_EEPROM_END)){
+	add_state=ADDRESS_IS_VALID;
+	}
+	else{
+	add_state=ADDRESS_IS_INVALID;
+	}
+return add_state;
+}
+
+
+static uint8_t Perform_Flash_Erase(uint8_t Sector_Numebr, uint8_t Number_Of_Sectors){
+uint8_t earase_stase=UNSUCCESSFUL_ERASE;
+	
+if(Sector_Numebr == CBL_FLASH_MASS_ERASE){
+	Flash_Unlock();
+	Flash_MassErase();
+	Flash_Lock();
+	earase_stase=SUCCESSFUL_ERASE;
+}
+else{
+		if((Sector_Numebr <=CBL_FLASH_MAX_SECTOR_NUMBER)&&((Sector_Numebr+Number_Of_Sectors)<=CBL_FLASH_MAX_SECTOR_NUMBER)){
+		Flash_EraseSectors(Sector_Numebr,Number_Of_Sectors);
+			earase_stase=SUCCESSFUL_ERASE;
+		}
+		else{
+		earase_stase=UNSUCCESSFUL_ERASE;
+		}
+}
+	return earase_stase;
+}
+
+ 
+
+
+void BL_Print_Messege(char *format, ...){
+	 char Messege[100]={0};
+	va_list args;
+	va_start(args,format);
+	vsprintf(Messege,format,args);
+	#ifdef BL_ENABLE_UART_DEBUG_MESSAGE
+	UART_WriteString(BL_DEBUG_UART, (uint8_t *)Messege,sizeof(Messege));
+	#endif
+	va_end(args);
+
+}
+
+
+static void jump_to_user_app(void){
+
+uint32_t msp = *((volatile uint32_t *)FLASH_SECTOR12_BASE_ADDRESS);
+    uint32_t reset_handler_add = *((volatile uint32_t *)(FLASH_SECTOR12_BASE_ADDRESS + 4));
+    pMainApp reset_app = (pMainApp)reset_handler_add;
+
+    __disable_irq();                  // Disable all interrupts
+    SCB->VTOR = FLASH_SECTOR12_BASE_ADDRESS; // Set vector table to application
+    __set_MSP(msp);                   // Set the MSP to the application's stack pointer
+    __enable_irq();                   // Re-enable interrupts
+    reset_app();
+}
+#include "App.h"
+int main(void) {
+	SysClockSet(16);    
+	 UART_Init(UART_MODULE_5, 9600);
+	 UART_Init(UART_MODULE_3, 9600);
+
+    while (1) {
+
+        BL_UART_Fetch_Host_Command();
+    }
+}
+app side 
+#include "sysclockcfg.h"
+#include "button.h"
+#include "gpio.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+
+#define LONG_TIME         0xffff
+#define LED_RED_PIN       1  // PF1 is Red LED
+
+SemaphoreHandle_t xSemaphore = NULL;
+
+// Task to toggle the LED
+void vTask1(void *pvParameters) {
+    while (1) {
+        // Wait for the semaphore indefinitely
+        if (xSemaphoreTake(xSemaphore, LONG_TIME) == pdTRUE) {
+            // Execute when semaphore is taken
+            GPIO_WritePin(GPIOF, LED_RED_PIN, 1);  // Turn LED on
+            vTaskDelay(pdMS_TO_TICKS(100));       // Delay for 100 ms
+            GPIO_WritePin(GPIOF, LED_RED_PIN, 0);  // Turn LED off
+            vTaskDelay(pdMS_TO_TICKS(100));       // Delay for 100 ms
+        }
+    }
+}
+
+// Interrupt handler for SW1
+void SW1_Handler(void) {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
+    // Give the semaphore from ISR
+    xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
+
+    // Clear the interrupt flag
+    GPIOF->ICR |= (1U << 4);
+
+    // Request context switch if needed
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+int main(void) {
+    // Set up the system clock
+    SysClockSet(16);
+
+    // Initialize GPIO for LED
+    GPIO_Init(GPIOF, LED_RED_PIN, GPIO_MODE_OUTPUT);
+    GPIO_WritePin(GPIOF, LED_RED_PIN, 0);  // Start with LED off
+
+    // Create the semaphore
+    xSemaphore = xSemaphoreCreateBinary();
+    if (xSemaphore == NULL) {
+        // Handle error if semaphore creation failed
+        while (1);
+    }
+
+    // Create the task
+    xTaskCreate(
+        vTask1,        // Task function
+        "LED_Task",    // Task name
+        configMINIMAL_STACK_SIZE,  // Stack size
+        NULL,          // Task parameters
+        1,             // Priority
+        NULL           // Task handle
+    );
+
+    // Initialize SW1 interrupt
+    Button_InitInterrupt(GPIOF, SW1_PIN, SW1_Handler);
+
+    // Start the FreeRTOS scheduler
+    vTaskStartScheduler();
+
+    // Should never reach here
+    while (1);
+}
+host side 
+import serial
+import struct
+import os
+import sys
+import glob
+from time import sleep
+
+''' Bootloader Commands '''
+CBL_GET_VER_CMD              = 0x10
+CBL_GET_HELP_CMD             = 0x11
+CBL_GET_CID_CMD              = 0x12
+CBL_GO_TO_ADDR_CMD           = 0x14
+CBL_FLASH_ERASE_CMD          = 0x15
+CBL_MEM_WRITE_CMD            = 0x16
+
+
+INVALID_SECTOR_NUMBER        = 0x00
+VALID_SECTOR_NUMBER          = 0x01
+UNSUCCESSFUL_ERASE           = 0x02
+SUCCESSFUL_ERASE             = 0x03
+
+FLASH_PAYLOAD_WRITE_FAILED   = 0x00
+FLASH_PAYLOAD_WRITE_PASSED   = 0x01
+
+verbose_mode = 1
+Memory_Write_Active = 0
+
+def Check_Serial_Ports():
+    Serial_Ports = []
+    
+    if sys.platform.startswith('win'):
+        Ports = ['COM%s' % (i + 1) for i in range(256)]
+    else:
+        raise EnvironmentError("Error !! Unsupported Platform \n")
+    
+    for Serial_Port in Ports:
+        try:
+            test = serial.Serial(Serial_Port)
+            test.close()
+            Serial_Ports.append(Serial_Port)
+        except (OSError, serial.SerialException):
+            pass
+    
+    return Serial_Ports
+
+def Serial_Port_Configuration(Port_Number):
+    global Serial_Port_Obj
+    try:
+        Serial_Port_Obj = serial.Serial(Port_Number, 9600, timeout = 2)
+    except:
+        print("\nError !! That was not a valid port")
+    
+        Port_Number = Check_Serial_Ports()
+        if(not Port_Number):
+            print("\nError !! No ports Detected")
+        else:
+            print("\nHere are some available ports on your PC. Try Again !!")
+            print("\n   ", Port_Number)
+        return -1
+    
+    if Serial_Port_Obj.is_open:
+        print("Port Open Success \n")
+    else:
+        print("Port Open Failed \n")
+
+def Write_Data_To_Serial_Port(Value, Length):
+    _data = struct.pack('>B', Value)
+    if(verbose_mode):
+        Value = bytearray(_data)
+        print("   "+"0x{:02x}".format(Value[0]), end = ' ')
+        if(Memory_Write_Active and (not verbose_mode)):
+            print("#", end = ' ')
+        Serial_Port_Obj.write(_data)
+
+def Read_Serial_Port(Data_Len):
+    
+    Serial_Value = Serial_Port_Obj.read(Data_Len)
+    Serial_Value_len = len(Serial_Value)
+    while Serial_Value_len <= 0:
+        Serial_Value = Serial_Port_Obj.read(Data_Len)
+        Serial_Value_len = len(Serial_Value)
+        print("Waiting Replay from the Bootloader")
+    return Serial_Value
+    
+    '''
+    Serial_Value = Serial_Port_Obj.read(Data_Len)
+    return Serial_Value
+    '''
+
+def Read_Data_From_Serial_Port(Command_Code):
+    Length_To_Follow = 0
+    
+    BL_ACK = Read_Serial_Port(2)
+    if(len(BL_ACK)):
+        BL_ACK_Array = bytearray(BL_ACK)
+        if(BL_ACK_Array[0] == 0xCD):
+            print ("\n   Received Acknowledgement from Bootloader")
+            Length_To_Follow = BL_ACK_Array[1]
+            print("   Preparing to receive (", int(Length_To_Follow), ") bytes from the bootloader")
+            if(Command_Code == CBL_GET_VER_CMD):
+                Process_CBL_GET_VER_CMD(Length_To_Follow)
+            elif (Command_Code == CBL_GET_HELP_CMD):
+                Process_CBL_GET_HELP_CMD(Length_To_Follow)
+            elif (Command_Code == CBL_GET_CID_CMD):
+                Process_CBL_GET_CID_CMD(Length_To_Follow)
+            elif (Command_Code == CBL_GO_TO_ADDR_CMD):
+                Process_CBL_GO_TO_ADDR_CMD(Length_To_Follow)
+            elif (Command_Code == CBL_FLASH_ERASE_CMD):
+                Process_CBL_FLASH_ERASE_CMD(Length_To_Follow)
+            elif (Command_Code == CBL_MEM_WRITE_CMD):
+                Process_CBL_MEM_WRITE_CMD(Length_To_Follow)
+            
+        else:
+            print ("\n   Received Not-Acknowledgement from Bootloader")
+            sys.exit()
+        
+def Process_CBL_GET_VER_CMD(Data_Len):
+    Serial_Data = Read_Serial_Port(Data_Len)
+    _value_ = bytearray(Serial_Data)
+    print("\n   Bootloader Vendor ID : ", _value_[0])
+    print("   Bootloader Version   : ", _value_[1], ".", _value_[2], ".", _value_[3])
+
+def Process_CBL_GET_HELP_CMD(Data_Len):
+    Serial_Data = Read_Serial_Port(Data_Len)
+    _value_ = bytearray(Serial_Data)
+    print("\n   Supported Commands : ", end = ' ')
+    for command in _value_:
+        print(hex(command), end = ' ')
+
+def Process_CBL_GET_CID_CMD(Data_Len):
+    Serial_Data = Read_Serial_Port(Data_Len)
+    CID = (Serial_Data[1] << 8) | Serial_Data[0]
+    print("\n   Chip Identification Number : ", hex(CID))
+
+def Process_CBL_GO_TO_ADDR_CMD(Data_Len):
+    Serial_Data = Read_Serial_Port(Data_Len)
+    _value_ = bytearray(Serial_Data)
+    if(_value_[0] == 1):
+        print("\n   Address Status is Valid")
+    elif(_value_[0] == 130):
+        print("\n   Address Status is Valid")
+    else:
+        print("\n   Address Status is InValid")
+    
+
+def Process_CBL_FLASH_ERASE_CMD(Data_Len):
+    BL_Erase_Status = 0
+    Serial_Data = Read_Serial_Port(Data_Len)
+    if(len(Serial_Data)):
+        BL_Erase_Status = bytearray(Serial_Data)
+        if(BL_Erase_Status[0] == INVALID_SECTOR_NUMBER):
+            print("\n   Erase Status -> Invalid Sector Number ")
+        elif (BL_Erase_Status[0] == UNSUCCESSFUL_ERASE):
+            print("\n   Erase Status -> Unsuccessfule Erase ")
+        elif (BL_Erase_Status[0] == SUCCESSFUL_ERASE):
+            print("\n   Erase Status -> Successfule Erase ")
+        else:
+            print("\n   Erase Status -> Unknown Error")
+    else:
+        print("Timeout !!, Bootloader is not responding")
+
+def Process_CBL_MEM_WRITE_CMD(Data_Len):
+    global Memory_Write_All
+    BL_Write_Status = 0
+    Serial_Data = Read_Serial_Port(Data_Len)
+    BL_Write_Status = bytearray(Serial_Data)
+    if(BL_Write_Status[0] == FLASH_PAYLOAD_WRITE_FAILED):
+        print("\n   Write Status -> Write Failed or Invalid Address ")
+    elif (BL_Write_Status[0] == FLASH_PAYLOAD_WRITE_PASSED):
+        print("\n   Write Status -> Write Successfule ")
+        Memory_Write_All = Memory_Write_All and FLASH_PAYLOAD_WRITE_PASSED
+    else:
+        print("Timeout !!, Bootloader is not responding")
+def Calculate_CRC32(Buffer, Buffer_Length):
+    CRC_Value = 0xFFFFFFFF
+    for DataElem in Buffer[0:Buffer_Length]:
+        CRC_Value = CRC_Value ^ DataElem
+        for DataElemBitLen in range(32):
+            if(CRC_Value & 0x80000000):
+                CRC_Value = (CRC_Value << 1) ^ 0x04C11DB7
+            else:
+                CRC_Value = (CRC_Value << 1)
+    return CRC_Value
+    
+def Word_Value_To_Byte_Value(Word_Value, Byte_Index, Byte_Lower_First):
+    Byte_Value = (Word_Value >> (8 * (Byte_Index - 1)) & 0x000000FF)
+    return Byte_Value
+
+def CalulateBinFileLength():
+    BinFileLength = os.path.getsize("Application.bin")
+    return BinFileLength
+
+def OpenBinFile():
+    global BinFile
+    BinFile = open('Application.bin', 'rb')
+
+def Decode_CBL_Command(Command):
+    BL_Host_Buffer = []
+    BL_Return_Value = 0
+    
+    ''' Clear the bootloader host buffer '''
+    for counter in range(255):
+        BL_Host_Buffer.append(0)
+    
+    if(Command == 1):
+        print("Request the bootloader version")
+        CBL_GET_VER_CMD_Len = 6
+        BL_Host_Buffer[0] = CBL_GET_VER_CMD_Len - 1
+        BL_Host_Buffer[1] = CBL_GET_VER_CMD
+        CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_GET_VER_CMD_Len - 4)
+        CRC32_Value = CRC32_Value & 0xFFFFFFFF
+        print("Host CRC = ", hex(CRC32_Value))
+        BL_Host_Buffer[2] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+        BL_Host_Buffer[3] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+        BL_Host_Buffer[4] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+        BL_Host_Buffer[5] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+        Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+        for Data in BL_Host_Buffer[1 : CBL_GET_VER_CMD_Len]:
+            Write_Data_To_Serial_Port(Data, CBL_GET_VER_CMD_Len - 1)
+        Read_Data_From_Serial_Port(CBL_GET_VER_CMD)
+    elif (Command == 2):
+        print("Read the commands supported by the bootloader")
+        CBL_GET_HELP_CMD_Len = 6
+        BL_Host_Buffer[0] = CBL_GET_HELP_CMD_Len - 1
+        BL_Host_Buffer[1] = CBL_GET_HELP_CMD
+        CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_GET_HELP_CMD_Len - 4)
+        CRC32_Value = CRC32_Value & 0xFFFFFFFF
+        BL_Host_Buffer[2] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+        BL_Host_Buffer[3] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+        BL_Host_Buffer[4] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+        BL_Host_Buffer[5] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+        Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+        for Data in BL_Host_Buffer[1 : CBL_GET_HELP_CMD_Len]:
+            Write_Data_To_Serial_Port(Data, CBL_GET_HELP_CMD_Len - 1)
+        Read_Data_From_Serial_Port(CBL_GET_HELP_CMD)
+    elif (Command == 3):
+        print("Read the MCU chip identification number")
+        CBL_GET_CID_CMD_Len = 6
+        BL_Host_Buffer[0] = CBL_GET_CID_CMD_Len - 1
+        BL_Host_Buffer[1] = CBL_GET_CID_CMD
+        CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_GET_CID_CMD_Len - 4)
+        CRC32_Value = CRC32_Value & 0xFFFFFFFF
+        BL_Host_Buffer[2] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+        BL_Host_Buffer[3] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+        BL_Host_Buffer[4] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+        BL_Host_Buffer[5] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+        Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+        for Data in BL_Host_Buffer[1 : CBL_GET_CID_CMD_Len]:
+            Write_Data_To_Serial_Port(Data, CBL_GET_CID_CMD_Len - 1)
+        Read_Data_From_Serial_Port(CBL_GET_CID_CMD)
+    elif (Command == 4):
+        print("Jump bootloader to specified address command")
+        CBL_GO_TO_ADDR_CMD_Len = 10
+        CBL_Jump_Address = input("\n   Please Enter the Address in Hex : ")
+        CBL_Jump_Address = int(CBL_Jump_Address, 16)
+        BL_Host_Buffer[0] = CBL_GO_TO_ADDR_CMD_Len - 1
+        BL_Host_Buffer[1] = CBL_GO_TO_ADDR_CMD
+        BL_Host_Buffer[2] = Word_Value_To_Byte_Value(CBL_Jump_Address, 1, 1) 
+        BL_Host_Buffer[3] = Word_Value_To_Byte_Value(CBL_Jump_Address, 2, 1) 
+        BL_Host_Buffer[4] = Word_Value_To_Byte_Value(CBL_Jump_Address, 3, 1) 
+        BL_Host_Buffer[5] = Word_Value_To_Byte_Value(CBL_Jump_Address, 4, 1)
+        CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_GO_TO_ADDR_CMD_Len - 4) 
+        CRC32_Value = CRC32_Value & 0xFFFFFFFF
+        BL_Host_Buffer[6] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+        BL_Host_Buffer[7] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+        BL_Host_Buffer[8] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+        BL_Host_Buffer[9] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+        Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+        for Data in BL_Host_Buffer[1 : CBL_GO_TO_ADDR_CMD_Len]:
+            Write_Data_To_Serial_Port(Data, CBL_GO_TO_ADDR_CMD_Len - 1)
+        Read_Data_From_Serial_Port(CBL_GO_TO_ADDR_CMD)
+    elif (Command == 5):
+        print("Mass erase or sector erase of the user flash command")
+        CBL_FLASH_ERASE_CMD_Len = 8
+        SectorNumber = 0
+        NumberOfSectors = 0
+        BL_Host_Buffer[0] = CBL_FLASH_ERASE_CMD_Len - 1
+        BL_Host_Buffer[1] = CBL_FLASH_ERASE_CMD
+        SectorNumber = input("\n   Please enter start sector number(0-255)          : ")
+        SectorNumber = int(SectorNumber)
+        if(SectorNumber != 0xFF):
+            NumberOfSectors = int(input("\n   Please enter number of sectors to erase (255 Max): "))
+        BL_Host_Buffer[2] = SectorNumber
+        BL_Host_Buffer[3] = NumberOfSectors
+        CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_FLASH_ERASE_CMD_Len - 4) 
+        CRC32_Value = CRC32_Value & 0xFFFFFFFF
+        BL_Host_Buffer[4] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+        BL_Host_Buffer[5] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+        BL_Host_Buffer[6] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+        BL_Host_Buffer[7] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+        Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+        for Data in BL_Host_Buffer[1 : CBL_FLASH_ERASE_CMD_Len]:
+            Write_Data_To_Serial_Port(Data, CBL_FLASH_ERASE_CMD_Len - 1)
+        Read_Data_From_Serial_Port(CBL_FLASH_ERASE_CMD)
+    elif (Command == 6):
+        print("Write data into different memories of the MCU command")
+        global Memory_Write_Is_Active
+        global Memory_Write_All
+        File_Total_Len = 0
+        BinFileRemainingBytes = 0
+        BinFileSentBytes = 0
+        BaseMemoryAddress = 0
+        BinFileReadLength = 0
+        Memory_Write_All = 1
+        
+        ''' Get the total length of the binary file '''
+        File_Total_Len = CalulateBinFileLength()
+        print("   Preparing writing a binary file with length (", File_Total_Len, ") Bytes")
+        ''' Open the binary file '''
+        OpenBinFile()
+        ''' Calculate the remaining payload '''
+        BinFileRemainingBytes = File_Total_Len - BinFileSentBytes
+        ''' Get the start address to write the payload '''
+        BaseMemoryAddress = input("\n   Enter the start address : ")
+        BaseMemoryAddress = int(BaseMemoryAddress, 16)
+        ''' Keep sending the write packet till the last payload byte '''
+        while(BinFileRemainingBytes):
+            ''' Memory write is active '''
+            Memory_Write_Is_Active = 1
+            
+            ''' Read 128 bytes from the binary file each time '''
+            if(BinFileRemainingBytes >= 128):
+                BinFileReadLength = 128
+            else:
+                BinFileReadLength = BinFileRemainingBytes
+            
+            for BinFileByte in range(BinFileReadLength):
+                BinFileByteValue = BinFile.read(1)
+                BinFileByteValue = bytearray(BinFileByteValue)
+                BL_Host_Buffer[7 + BinFileByte] = int(BinFileByteValue[0])
+            
+            ''' Update the Host packet with the command code ID '''
+            BL_Host_Buffer[1] = CBL_MEM_WRITE_CMD
+        
+            ''' Update the Host packet with the base address '''
+            BL_Host_Buffer[2] = Word_Value_To_Byte_Value(BaseMemoryAddress, 1, 1)
+            BL_Host_Buffer[3] = Word_Value_To_Byte_Value(BaseMemoryAddress, 2, 1)
+            BL_Host_Buffer[4] = Word_Value_To_Byte_Value(BaseMemoryAddress, 3, 1)
+            BL_Host_Buffer[5] = Word_Value_To_Byte_Value(BaseMemoryAddress, 4, 1)
+            
+            ''' Update the Host packet with the payload length '''
+            BL_Host_Buffer[6] = BinFileReadLength
+            
+            ''' Update the Host packet with the packet length '''
+            CBL_MEM_WRITE_CMD_Len = (BinFileReadLength + 11)
+            BL_Host_Buffer[0] = CBL_MEM_WRITE_CMD_Len - 1
+            
+            ''' Update the Host packet with the calculated CRC32 '''
+            CRC32_Value = Calculate_CRC32(BL_Host_Buffer, CBL_MEM_WRITE_CMD_Len - 4) 
+            CRC32_Value = CRC32_Value & 0xFFFFFFFF
+            BL_Host_Buffer[7 + BinFileReadLength] = Word_Value_To_Byte_Value(CRC32_Value, 1, 1)
+            BL_Host_Buffer[8 + BinFileReadLength] = Word_Value_To_Byte_Value(CRC32_Value, 2, 1)
+            BL_Host_Buffer[9 + BinFileReadLength] = Word_Value_To_Byte_Value(CRC32_Value, 3, 1)
+            BL_Host_Buffer[10+ BinFileReadLength] = Word_Value_To_Byte_Value(CRC32_Value, 4, 1)
+            
+            ''' Calculate the next Base memory address '''
+            BaseMemoryAddress = BaseMemoryAddress + BinFileReadLength
+            
+            ''' Send the packet length to the bootloader '''
+            Write_Data_To_Serial_Port(BL_Host_Buffer[0], 1)
+            
+            ''' Send the complete packet to the bootloader '''
+            for Data in BL_Host_Buffer[1 : CBL_MEM_WRITE_CMD_Len]:
+                Write_Data_To_Serial_Port(Data, CBL_MEM_WRITE_CMD_Len - 1)
+            
+            ''' Update the total number of bytes sent to the bootloader '''
+            BinFileSentBytes = BinFileSentBytes + BinFileReadLength
+            
+            ''' Calculate the remaining payload '''
+            BinFileRemainingBytes = File_Total_Len - BinFileSentBytes
+            print("\n   Bytes sent to the bootloader :{0}".format(BinFileSentBytes))
+            
+            ''' Read the response from the bootloader '''
+            BL_Return_Value = Read_Data_From_Serial_Port(CBL_MEM_WRITE_CMD)
+            sleep(0.1)
+        ''' Memory write is inactive '''
+        Memory_Write_Is_Active = 0
+        if(Memory_Write_All == 1):
+            print("\n\n Payload Written Successfully")
+            
+SerialPortName = input("Enter the Port Name of your device(Ex: COM3):")
+Serial_Port_Configuration(SerialPortName)
+        
+while True:
+    print("\nTM4C123GH6PM Custome BootLoader")
+    print("==============================")
+    print("Which command you need to send to the bootLoader :");
+    print("   CBL_GET_VER_CMD              --> 1")
+    print("   CBL_GET_HELP_CMD             --> 2")
+    print("   CBL_GET_CID_CMD              --> 3")
+    print("   CBL_GO_TO_ADDR_CMD           --> 4")
+    print("   CBL_FLASH_ERASE_CMD          --> 5")
+    print("   CBL_MEM_WRITE_CMD            --> 6")
+    CBL_Command = input("\nEnter the command code : ")
+    
+    if(not CBL_Command.isdigit()):
+        print("   Error !!, Please enter a valid command !! \n")
+    else:
+        Decode_CBL_Command(int(CBL_Command))
+    
+    input("\nPlease press any key to continue ...")
+    Serial_Port_Obj.reset_input_buffer()
+the purpose is that the bootloader will update the application with host 
+analyse the code and be perfect to make a good presentation 
