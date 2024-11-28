@@ -13,7 +13,7 @@
 #define configTICK_RATE_HZ                        (1000)         // Tick frequency (1 ms tick)
 #define configMAX_PRIORITIES                      (5)            // Number of priorities (including idle)
 #define configMINIMAL_STACK_SIZE                  (128)          // Minimal stack size in words
-#define configTOTAL_HEAP_SIZE                     (16 * 1024)     // 8 KB heap for RTOS dynamic allocations
+#define configTOTAL_HEAP_SIZE                     (24 * 1024)     // 8 KB heap for RTOS dynamic allocations
 #define configMAX_TASK_NAME_LEN                   (16)           // Task name max length
 
 /* System configurations */
@@ -24,7 +24,7 @@
 #define configIDLE_SHOULD_YIELD                   1              // Idle task yields processor
 
 /* Memory allocation */
-#define configSUPPORT_STATIC_ALLOCATION           0              // Allow static memory allocation
+#define configSUPPORT_STATIC_ALLOCATION           1              // Allow static memory allocation
 #define configSUPPORT_DYNAMIC_ALLOCATION          1              // Allow dynamic memory allocation
 
 /* Debugging and runtime stats */

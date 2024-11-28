@@ -11,4 +11,4 @@
   E:\Users\Unlimited\AppData\Local\Arm\Packs\Keil\TM4C_DFP\1.1.0\Device\Include\TM4C123\system_TM4C123.h \
   button.h gpio.h FreeRTOS.h E:\Keil_v5\ARM\ARMCLANG\include\stddef.h \
   FreeRTOSConfig.h projdefs.h portable.h deprecated_definitions.h \
-  portmacro.h mpu_wrappers.h task.h list.h
+  portmacro.h mpu_wrappers.h task.h list.h semphr.h queue.h
