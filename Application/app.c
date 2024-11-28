@@ -35,7 +35,7 @@ int main(void) {
     SysClockSet(16);
 
     // Initialize GPIO for LED
-    GPIO_Init(GPIOF, LED_RED_PIN, GPIO_MODE_OUTPUT);
+   // GPIO_Init(GPIOF, LED_RED_PIN, GPIO_MODE_OUTPUT);
     GPIO_WritePin(GPIOF, LED_RED_PIN, 0);  // Start with LED off
 
     // Create the semaphore
