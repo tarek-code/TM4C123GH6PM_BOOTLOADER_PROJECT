@@ -1,4 +1,4 @@
-./objects/app.o: app.c sysclockcfg.h \
+./objects/app.o: app.c app.h sysclockcfg.h \
   E:\Keil_v5\ARM\ARMCLANG\include\stdint.h \
   E:\Users\Unlimited\AppData\Local\Arm\Packs\Keil\TM4C_DFP\1.1.0\Device\Include\TM4C123\TM4C123GH6PM.h \
   E:\Users\Unlimited\AppData\Local\Arm\Packs\ARM\CMSIS\6.1.0\CMSIS\Core\Include\core_cm4.h \

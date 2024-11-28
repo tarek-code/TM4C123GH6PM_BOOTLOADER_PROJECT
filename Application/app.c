@@ -1,14 +1,5 @@
-#include "sysclockcfg.h"
-#include "button.h"
-#include "gpio.h"
-#include "FreeRTOS.h"
-#include "task.h"
-#include "semphr.h"
+#include "app.h"
 
-#define LONG_TIME         0xffff
-#define LED_RED_PIN       1  // PF1 is Red LED
-
-SemaphoreHandle_t xSemaphore = NULL;
 
 // Task to toggle the LED
 void vTask1(void *pvParameters) {
@@ -26,7 +17,8 @@ void vTask1(void *pvParameters) {
 
 // Interrupt handler for SW1
 void SW1_Handler(void) {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
     // Give the semaphore from ISR
     xSemaphoreGiveFromISR(xSemaphore, &xHigherPriorityTaskWoken);
